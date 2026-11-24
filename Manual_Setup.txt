@@ -1,0 +1,44 @@
+Manual setup steps                                                                         
+1. Install the tools (once)
+- STM32CubeMX: for generating the project.
+- STM32CubeCLT: gives you arm-none-eabi-gcc, cmake, ninja and STM32_Programmer_CLI in one package. Add its bin folders to your PATH.
+- STM32CubeIDE: you already have it. Use it only for debugging.
+- MinGW: already installed. Used for the PC unit tests.
+
+2. Generate the project in CubeMX
+1. Go to New Project → Board Selector → choose NUCLEO-F767ZI. Answer "Initialize peripherals in default mode?" with No, so you start clean.
+2. Under System Core → SYS, set Debug = Serial Wire.
+3. Under RCC, set HSE = BYPASS Clock Source, because the ST-Link supplies an 8 MHz clock to the board.
+4. Under Clock Configuration, set HCLK = 216 MHz. If CubeMX asks, let it fix the settings automatically.
+5. Under Cortex_M7, turn on ICache. Leave DCache off for now; turn it on later after you've handled DMA (step 6).
+6. Add USART3 (PD8/PD9). That's the ST-Link virtual COM port, so you get printf over USB.
+7. Under Project Manager:
+   - Name: sensor_fusion
+   - Location: F:\
+   - Toolchain: CMake
+8. Under Code Generator, tick "Generate peripheral initialization as a pair of .c/.h files".
+9. Click Generate Code.
+
+3. Build from PowerShell
+cd F:\sensor_fusion
+cmake --preset Debug
+cmake --build --preset Debug
+The output is build\Debug\sensor_fusion.elf.
+
+4. Flash
+STM32_Programmer_CLI -c port=SWD -w build\Debug\sensor_fusion.elf -v -rst
+Later, put this in a flash.ps1 script, like the 5 kg project's.
+
+5. Folder layout
+Core/           CubeMX generated: only edit inside USER CODE blocks
+App/            your code that calls the HAL (sensor drivers, tasks)
+Lib/            pure logic with no HAL calls: fusion math, filters, parsing
+test/host/      unit tests for Lib/, built with MinGW on the PC
+Add App/ and Lib/ to CMakeLists.txt in its user sources section.
+
+6. F7 problems to avoid
+- D-cache + DMA: buffers that DMA writes need either SCB_InvalidateDCache_by_Addr or an MPU region marked non-cacheable. Without one of these, your sensor data comes out corrupted with no error.
+- Flash sectors: the F767 erases flash in 32, 128 or 256 KB sectors, not the F103's 1 KB pages. If you need to store a config record, reserve one sector for it in the linker script.
+- Git: run git init right after the first generate, so you have a clean starting point before you change anything.
+
+Once the board blinks or prints over USART3, start a Claude Code session in F:\sensor_fusion for the sensor and fusion work.

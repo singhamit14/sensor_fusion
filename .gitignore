@@ -1,0 +1,17 @@
+@'
+# build output
+build/
+
+# IDE / tool leftovers
+.vscode/
+*.launch
+.settings/
+.cproject
+.project
+Debug/
+Release/
+
+# OS junk
+Thumbs.db
+desktop.ini
+'@ | Out-File -Encoding ascii .gitignore

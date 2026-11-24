@@ -1,0 +1,17 @@
+# Windows uses CRLF and some tools use LF; this file stops git from showing whole-file diffs because of that.
+@'
+* text=auto
+*.c   text eol=lf
+*.h   text eol=lf
+*.s   text eol=lf
+*.ld  text eol=lf
+*.txt text eol=lf
+*.cmake text eol=lf
+*.json text eol=lf
+*.ioc text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.elf binary
+*.bin binary
+*.hex binary
+'@ | Out-File -Encoding ascii .gitattributes
