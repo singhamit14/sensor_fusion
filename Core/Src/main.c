@@ -111,9 +111,17 @@ int main(void)
 
     /* echo: whatever the PC sends comes back */
     uint32_t len = usb_read(rx, sizeof(rx));
-    if (len > 0)
+     if (len > 0)
     {
-      usb_printf("echo: %.*s\r\n", (int)len, rx);
+      if (rx[0] == 'b')       /* burst test: 100 lines, about 4 KB */
+      {
+        for (uint32_t i = 0; i < 100; i++)
+          usb_printf("burst %03lu  0123456789abcdef\r\n", i);
+      }
+      else
+      {
+        usb_printf("echo: %.*s\r\n", (int)len, rx);
+      }
     }
 
     /* every 500 ms: blink + tick on both ports */
@@ -121,7 +129,8 @@ int main(void)
     {
       last = HAL_GetTick();
       HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-      usb_printf("tick %lu  ms=%lu  pi=%.3f\r\n", n, HAL_GetTick(), 3.14159f);
+      usb_printf("tick %lu  ms=%lu  pi=%.3f  drop=%lu  free=%lu\r\n",
+                 n, HAL_GetTick(), 3.14159f, usb_tx_dropped(), usb_tx_free());
       n++;
     }
   }

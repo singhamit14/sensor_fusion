@@ -97,8 +97,16 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
+#define USB_TX_RING_SIZE  4096u                 /* must be power of 2 */
+#define USB_TX_RING_MASK  (USB_TX_RING_SIZE - 1u)
+#define USB_TX_CHUNK_MAX  1024u                 /* max bytes per USB transfer */
 static volatile uint8_t  usb_rx_buf[64];
 static volatile uint32_t usb_rx_len = 0;   /* 0 = empty; main loop clears it */
+static uint8_t           tx_ring[USB_TX_RING_SIZE];
+static volatile uint32_t tx_head = 0;      /* written only by usb_write (main)        */
+static volatile uint32_t tx_tail = 0;      /* written only by TransmitCplt (USB IRQ)   */
+static volatile uint32_t tx_inflight = 0;  /* bytes handed to USB, not yet confirmed   */
+static volatile uint32_t tx_dropped = 0;   /* bytes dropped because ring was full      */
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -133,6 +141,7 @@ static int8_t CDC_Receive_FS(uint8_t* pbuf, uint32_t *Len);
 static int8_t CDC_TransmitCplt_FS(uint8_t *pbuf, uint32_t *Len, uint8_t epnum);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
+static void usb_tx_kick(void);
 
 /* USER CODE END PRIVATE_FUNCTIONS_DECLARATION */
 
@@ -157,6 +166,7 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
 static int8_t CDC_Init_FS(void)
 {
   /* USER CODE BEGIN 3 */
+   tx_inflight = 0;   /* (re)enumerated: any old transfer is gone, resend from tail */
   /* Set Application Buffers */
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
@@ -171,6 +181,7 @@ static int8_t CDC_Init_FS(void)
 static int8_t CDC_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
+  tx_inflight = 0;   /* cable unplugged / reset */
   return (USBD_OK);
   /* USER CODE END 4 */
 }
@@ -322,30 +333,80 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
+  tx_tail += tx_inflight;   /* chunk confirmed sent: free it */
+  tx_inflight = 0;
+  usb_tx_kick();            /* start next chunk, if any */
   /* USER CODE END 13 */
   return result;
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+/* Start next transfer. Call only from USB IRQ, or with OTG_FS_IRQn masked. */
+static void usb_tx_kick(void)
+{
+  if (tx_inflight != 0) return;                                   /* busy */
+  if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) return;    /* no host */
+
+  uint32_t used = tx_head - tx_tail;
+  if (used == 0) return;                                          /* empty */
+
+  uint32_t idx   = tx_tail & USB_TX_RING_MASK;
+  uint32_t chunk = USB_TX_RING_SIZE - idx;     /* contiguous up to buffer end */
+  if (chunk > used)             chunk = used;
+  if (chunk > USB_TX_CHUNK_MAX) chunk = USB_TX_CHUNK_MAX;
+
+  if (CDC_Transmit_FS(&tx_ring[idx], (uint16_t)chunk) == USBD_OK)
+  {
+    tx_inflight = chunk;
+  }
+}
+
 uint8_t usb_ready(void)
 {
-  if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) return 0;
-  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
-  return (hcdc != NULL) && (hcdc->TxState == 0);
+  return hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED;
+}
+
+/* Queue bytes. All-or-nothing: returns len, or 0 if not enough space. */
+uint32_t usb_write(const uint8_t *data, uint32_t len)
+{
+  uint32_t free = USB_TX_RING_SIZE - (tx_head - tx_tail);
+  if (len == 0) return 0;
+  if (len > free)
+  {
+    tx_dropped += len;
+    return 0;
+  }
+
+  uint32_t head  = tx_head;
+  uint32_t idx   = head & USB_TX_RING_MASK;
+  uint32_t first = USB_TX_RING_SIZE - idx;     /* space before wrap */
+  if (first > len) first = len;
+  memcpy(&tx_ring[idx], data, first);
+  memcpy(&tx_ring[0], data + first, len - first);
+
+  __DMB();                  /* data must be in ring before head moves */
+  tx_head = head + len;
+
+  NVIC_DisableIRQ(OTG_FS_IRQn);   /* stop TransmitCplt racing this kick */
+  usb_tx_kick();
+  NVIC_EnableIRQ(OTG_FS_IRQn);
+  return len;
 }
 
 int usb_printf(const char *fmt, ...)
 {
   static char buf[256];
-  if (!usb_ready()) return -1;        /* not connected or still sending: drop */
   va_list ap;
   va_start(ap, fmt);
   int n = vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
   if (n <= 0) return n;
   if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
-  return (CDC_Transmit_FS((uint8_t *)buf, (uint16_t)n) == USBD_OK) ? n : -1;
+  return usb_write((const uint8_t *)buf, (uint32_t)n) ? n : -1;
 }
+
+uint32_t usb_tx_dropped(void) { return tx_dropped; }
+uint32_t usb_tx_free(void)    { return USB_TX_RING_SIZE - (tx_head - tx_tail); }
 
 uint32_t usb_read(uint8_t *dst, uint32_t max)
 {

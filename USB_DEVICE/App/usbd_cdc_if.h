@@ -110,8 +110,11 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 
 /* USER CODE BEGIN EXPORTED_FUNCTIONS */
 uint8_t  usb_ready(void);
+uint32_t usb_write(const uint8_t *data, uint32_t len);
 int      usb_printf(const char *fmt, ...);
 uint32_t usb_read(uint8_t *dst, uint32_t max);
+uint32_t usb_tx_dropped(void);
+uint32_t usb_tx_free(void);
 
 /* USER CODE END EXPORTED_FUNCTIONS */
 
