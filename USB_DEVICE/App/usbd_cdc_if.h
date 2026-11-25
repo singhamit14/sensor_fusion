@@ -109,6 +109,9 @@ extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
 uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 
 /* USER CODE BEGIN EXPORTED_FUNCTIONS */
+uint8_t  usb_ready(void);
+int      usb_printf(const char *fmt, ...);
+uint32_t usb_read(uint8_t *dst, uint32_t max);
 
 /* USER CODE END EXPORTED_FUNCTIONS */
 

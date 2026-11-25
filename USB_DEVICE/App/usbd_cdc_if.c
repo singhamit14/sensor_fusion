@@ -22,6 +22,9 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
 
 /* USER CODE END INCLUDE */
 
@@ -94,6 +97,8 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
+static volatile uint8_t  usb_rx_buf[64];
+static volatile uint32_t usb_rx_len = 0;   /* 0 = empty; main loop clears it */
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -261,6 +266,12 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
+   if (usb_rx_len == 0)   /* previous packet consumed? else drop this one */
+  {
+    uint32_t n = (*Len > sizeof(usb_rx_buf)) ? sizeof(usb_rx_buf) : *Len;
+    memcpy((uint8_t *)usb_rx_buf, Buf, n);
+    usb_rx_len = n;
+  }
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);
@@ -316,6 +327,35 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+uint8_t usb_ready(void)
+{
+  if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) return 0;
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
+  return (hcdc != NULL) && (hcdc->TxState == 0);
+}
+
+int usb_printf(const char *fmt, ...)
+{
+  static char buf[256];
+  if (!usb_ready()) return -1;        /* not connected or still sending: drop */
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  if (n <= 0) return n;
+  if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
+  return (CDC_Transmit_FS((uint8_t *)buf, (uint16_t)n) == USBD_OK) ? n : -1;
+}
+
+uint32_t usb_read(uint8_t *dst, uint32_t max)
+{
+  uint32_t n = usb_rx_len;
+  if (n == 0) return 0;
+  if (n > max) n = max;
+  memcpy(dst, (const uint8_t *)usb_rx_buf, n);
+  usb_rx_len = 0;                     /* free buffer for next packet */
+  return n;
+}
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 

@@ -25,6 +25,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "usbd_cdc_if.h"
 
 /* USER CODE END Includes */
 
@@ -110,9 +111,25 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     static uint32_t n = 0;
-    HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-    printf("tick %lu  ms=%lu  pi=%.3f\n", n++, HAL_GetTick(), 3.14159f);
-    HAL_Delay(500);
+    static uint32_t last = 0;
+    uint8_t rx[64];
+
+    /* echo: whatever the PC sends comes back */
+    uint32_t len = usb_read(rx, sizeof(rx));
+    if (len > 0)
+    {
+      usb_printf("echo: %.*s\r\n", (int)len, rx);
+    }
+
+    /* every 500 ms: blink + tick on both ports */
+    if (HAL_GetTick() - last >= 500)
+    {
+      last = HAL_GetTick();
+      HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+      printf("tick %lu  ms=%lu  pi=%.3f\n", n, HAL_GetTick(), 3.14159f);
+      usb_printf("usb tick %lu  ms=%lu\r\n", n, HAL_GetTick());
+      n++;
+    }
   }
   /* USER CODE END 3 */
 }
