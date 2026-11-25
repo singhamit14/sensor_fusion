@@ -18,13 +18,11 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usart.h"
 #include "usb_device.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
 #include "usbd_cdc_if.h"
 
 /* USER CODE END Includes */
@@ -95,11 +93,8 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART3_UART_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-  setvbuf(stdout, NULL, _IONBF, 0);   /* no buffering: text appears immediately */
-  printf("\nsensor_fusion boot, SYSCLK = %lu Hz\n", HAL_RCC_GetSysClockFreq());
 
   /* USER CODE END 2 */
 
@@ -126,8 +121,7 @@ int main(void)
     {
       last = HAL_GetTick();
       HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-      printf("tick %lu  ms=%lu  pi=%.3f\n", n, HAL_GetTick(), 3.14159f);
-      usb_printf("usb tick %lu  ms=%lu\r\n", n, HAL_GetTick());
+      usb_printf("tick %lu  ms=%lu  pi=%.3f\r\n", n, HAL_GetTick(), 3.14159f);
       n++;
     }
   }
