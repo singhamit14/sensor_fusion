@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "usbd_cdc_if.h"
+#include "app.h"
 
 /* USER CODE END Includes */
 
@@ -95,6 +95,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  app_init();
 
   /* USER CODE END 2 */
 
@@ -105,34 +106,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    static uint32_t n = 0;
-    static uint32_t last = 0;
-    uint8_t rx[64];
-
-    /* echo: whatever the PC sends comes back */
-    uint32_t len = usb_read(rx, sizeof(rx));
-     if (len > 0)
-    {
-      if (rx[0] == 'b')       /* burst test: 100 lines, about 4 KB */
-      {
-        for (uint32_t i = 0; i < 100; i++)
-          usb_printf("burst %03lu  0123456789abcdef\r\n", i);
-      }
-      else
-      {
-        usb_printf("echo: %.*s\r\n", (int)len, rx);
-      }
-    }
-
-    /* every 500 ms: blink + tick on both ports */
-    if (HAL_GetTick() - last >= 500)
-    {
-      last = HAL_GetTick();
-      HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-      usb_printf("tick %lu  ms=%lu  pi=%.3f  drop=%lu  free=%lu\r\n",
-                 n, HAL_GetTick(), 3.14159f, usb_tx_dropped(), usb_tx_free());
-      n++;
-    }
+    app_loop();
   }
   /* USER CODE END 3 */
 }

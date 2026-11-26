@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include "ringbuf.h"
 
 /* USER CODE END INCLUDE */
 
@@ -98,15 +99,13 @@ uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
 #define USB_TX_RING_SIZE  4096u                 /* must be power of 2 */
-#define USB_TX_RING_MASK  (USB_TX_RING_SIZE - 1u)
 #define USB_TX_CHUNK_MAX  1024u                 /* max bytes per USB transfer */
+_Static_assert((USB_TX_RING_SIZE & (USB_TX_RING_SIZE - 1u)) == 0, "ring size not power of 2");
 static volatile uint8_t  usb_rx_buf[64];
 static volatile uint32_t usb_rx_len = 0;   /* 0 = empty; main loop clears it */
 static uint8_t           tx_ring[USB_TX_RING_SIZE];
-static volatile uint32_t tx_head = 0;      /* written only by usb_write (main)        */
-static volatile uint32_t tx_tail = 0;      /* written only by TransmitCplt (USB IRQ)   */
-static volatile uint32_t tx_inflight = 0;  /* bytes handed to USB, not yet confirmed   */
-static volatile uint32_t tx_dropped = 0;   /* bytes dropped because ring was full      */
+static ringbuf_t         tx_rb = RINGBUF_STATIC_INIT(tx_ring, USB_TX_RING_SIZE);
+static volatile uint32_t tx_inflight = 0;  /* bytes handed to USB, not yet confirmed */
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -333,7 +332,7 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
-  tx_tail += tx_inflight;   /* chunk confirmed sent: free it */
+  ringbuf_consume(&tx_rb, tx_inflight);   /* chunk confirmed sent: free it */
   tx_inflight = 0;
   usb_tx_kick();            /* start next chunk, if any */
   /* USER CODE END 13 */
@@ -347,15 +346,12 @@ static void usb_tx_kick(void)
   if (tx_inflight != 0) return;                                   /* busy */
   if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) return;    /* no host */
 
-  uint32_t used = tx_head - tx_tail;
-  if (used == 0) return;                                          /* empty */
-
-  uint32_t idx   = tx_tail & USB_TX_RING_MASK;
-  uint32_t chunk = USB_TX_RING_SIZE - idx;     /* contiguous up to buffer end */
-  if (chunk > used)             chunk = used;
+  const uint8_t *p;
+  uint32_t chunk = ringbuf_peek(&tx_rb, &p);
+  if (chunk == 0) return;                                         /* empty */
   if (chunk > USB_TX_CHUNK_MAX) chunk = USB_TX_CHUNK_MAX;
 
-  if (CDC_Transmit_FS(&tx_ring[idx], (uint16_t)chunk) == USBD_OK)
+  if (CDC_Transmit_FS((uint8_t *)p, (uint16_t)chunk) == USBD_OK)
   {
     tx_inflight = chunk;
   }
@@ -369,23 +365,7 @@ uint8_t usb_ready(void)
 /* Queue bytes. All-or-nothing: returns len, or 0 if not enough space. */
 uint32_t usb_write(const uint8_t *data, uint32_t len)
 {
-  uint32_t free = USB_TX_RING_SIZE - (tx_head - tx_tail);
-  if (len == 0) return 0;
-  if (len > free)
-  {
-    tx_dropped += len;
-    return 0;
-  }
-
-  uint32_t head  = tx_head;
-  uint32_t idx   = head & USB_TX_RING_MASK;
-  uint32_t first = USB_TX_RING_SIZE - idx;     /* space before wrap */
-  if (first > len) first = len;
-  memcpy(&tx_ring[idx], data, first);
-  memcpy(&tx_ring[0], data + first, len - first);
-
-  __DMB();                  /* data must be in ring before head moves */
-  tx_head = head + len;
+  if (ringbuf_write(&tx_rb, data, len) == 0) return 0;   /* full: counted in dropped */
 
   NVIC_DisableIRQ(OTG_FS_IRQn);   /* stop TransmitCplt racing this kick */
   usb_tx_kick();
@@ -405,8 +385,8 @@ int usb_printf(const char *fmt, ...)
   return usb_write((const uint8_t *)buf, (uint32_t)n) ? n : -1;
 }
 
-uint32_t usb_tx_dropped(void) { return tx_dropped; }
-uint32_t usb_tx_free(void)    { return USB_TX_RING_SIZE - (tx_head - tx_tail); }
+uint32_t usb_tx_dropped(void) { return tx_rb.dropped; }
+uint32_t usb_tx_free(void)    { return ringbuf_free(&tx_rb); }
 
 uint32_t usb_read(uint8_t *dst, uint32_t max)
 {
