@@ -13,3 +13,6 @@ Release/
 # OS junk
 Thumbs.db
 desktop.ini
+
+# host test binaries
+test/host/*.exe
