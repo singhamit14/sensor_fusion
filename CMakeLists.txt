@@ -76,3 +76,11 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     -u _printf_float
     
 )
+
+# Post-build: make .hex and .bin next to the .elf, and print the size
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.hex
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${CMAKE_PROJECT_NAME}> ${CMAKE_PROJECT_NAME}.bin
+    COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+    COMMENT "Creating ${CMAKE_PROJECT_NAME}.hex / .bin"
+)
